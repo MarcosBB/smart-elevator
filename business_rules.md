@@ -1,6 +1,6 @@
 # Regras de Negócio — Sistema de Elevador Inteligente (versão genérica, n elevadores)
 
-> O número de elevadores é um **parâmetro** da máquina (`nbElevators`), de modo que o sistema atende **n elevadores**, com n configurável.
+> O número de andares e o de elevadores serão definidos pela edição dos valores das constantes **MAX_FLOOR** e **NB_ELEVATORS** respectivamentes nas definições da máquina, de modo que o sistema atenda genericamente a várias quantidades diferentes.
 > Cada regra é rastreável a um elemento formal do modelo (parâmetro, variável, invariante ou operação).
 
 ## 1. Visão Geral
@@ -21,12 +21,12 @@ O sistema gerencia um grupo de **n elevadores** (n ≥ 1, configurável) que ate
 ### 3.1 Estrutura do sistema
 
 **RN01 — Quantidade configurável de elevadores.**
-O sistema opera com **n elevadores**, onde n é um parâmetro de configuração (n ≥ 1), e não mais um valor fixo. Todas as demais regras valem para qualquer valor de n.
-*Modelo:* parâmetro de máquina `nbElevators`, tipado em `CONSTRAINTS` como `nbElevators : NAT1`; conjunto `ELEVATOR == 1..nbElevators`.
+O sistema opera com várias quantidades diferentes de elevadores, onde **NB_ELEVATORS** define a quantidade de elevadores.
+*Modelo:* constantes de máquina `NB_ELEVATORS` está definida em `DEFINITIONS` e `ELEVATOR == 1..NB_ELEVATORS` define que a quantidade de elevadores pode ser de 1 até `NB_ELEVATORS`.
 
 **RN02 — Faixa de andares.**
-Os andares são numerados de `0` (térreo) até `maxFloor`, também configurável por edifício.
-*Modelo:* parâmetro `maxFloor`, tipado em `CONSTRAINTS` como `maxFloor : NAT1`; `FLOOR == 0..maxFloor`.
+Os andares são numerados de `0` (térreo) até `MAX_FLOOR`, também configurável por edifício.
+*Modelo:* a constante `MAX_FLOOR` está definida em `DEFINITIONS` como `MAX_FLOOR == 9`, onde `9` pode ser quaquer valor concreto e `FLOOR == 0..MAX_FLOOR` define que a quantidade de andares pode ser de `zero` até `MAX_FLOOR`.
 
 ### 3.2 Entrada de requisições
 
@@ -37,8 +37,8 @@ Uma requisição pode se originar de duas formas distintas:
 *Modelo:* operações `RequestHallUp` / `RequestHallDown` (origem a) e `RequestCabin` (origem b).
 
 **RN04 — Botão de subir indisponível no último andar.**
-O botão "subir" não pode ser acionado no andar mais alto (`maxFloor`), pois não há para onde subir.
-*Modelo:* pré-condição `ff < maxFloor` em `RequestHallUp`.
+O botão "subir" não pode ser acionado no andar mais alto (`MAX_FLOOR`), pois não há para onde subir.
+*Modelo:* pré-condição `ff < MAX_FLOOR` em `RequestHallUp`.
 
 **RN05 — Botão de descer indisponível no térreo.**
 O botão "descer" não pode ser acionado no andar `0`.
@@ -56,7 +56,7 @@ Dentro de um elevador, o usuário só pode solicitar um andar diferente do andar
 
 **RN08 — Uma chamada de corredor é atendida por exatamente um elevador, entre os n disponíveis.**
 Cada chamada de subir/descer, uma vez atribuída, passa a ser de responsabilidade de um único elevador dentre os n existentes; nenhuma outra chamada pode ser atribuída ao mesmo par (andar, direção) até que essa seja atendida.
-*Modelo:* `assign_up` e `assign_down` são **funções parciais** (`FLOOR +-> ELEVATOR`), o que impede, por construção — independentemente do valor de `nbElevators` — que um mesmo andar/direção seja mapeado para mais de um elevador. A invariante `hall_up ∩ dom(assign_up) = ∅` garante que uma chamada nunca está simultaneamente pendente e atribuída.
+*Modelo:* `assign_up` e `assign_down` são **funções parciais** (`FLOOR +-> ELEVATOR`), o que impede, por construção — independentemente do valor de `NB_ELEVATORS` — que um mesmo andar/direção seja mapeado para mais de um elevador. A invariante `hall_up ∩ dom(assign_up) = ∅` garante que uma chamada nunca está simultaneamente pendente e atribuída.
 
 **RN09 — Uma chamada é removida do estado "pendente" no momento da atribuição.**
 Assim que um elevador é designado para uma chamada de corredor, ela deixa de aparecer como pendente para os demais elevadores.
@@ -88,20 +88,20 @@ Na escolha do elevador para atender uma chamada de corredor, o sistema prioriza,
 
 **RN15 — Penalização de elevadores desalinhados.**
 Um elevador parado longe do andar, ou em movimento na direção contrária, ou que já ultrapassou o andar solicitado, recebe uma penalidade adicional no cálculo de custo, tornando-o menos provável de ser escolhido.
-*Modelo:* ramo `ELSE` de `cost`, que soma `maxFloor` à distância como penalidade.
+*Modelo:* ramo `ELSE` de `cost`, que soma `MAX_FLOOR` à distância como penalidade.
 
 **RN16 — Seleção do elevador de menor custo entre os n disponíveis.**
-Entre os n elevadores do sistema, o sistema sempre escolhe, para atender uma chamada de corredor, aquele com o menor valor de `cost` para aquele andar e direção. Essa comparação é feita por um quantificador universal que percorre todo o conjunto `ELEVATOR`, portanto continua válida qualquer que seja o número de elevadores configurado.
+Entre os n elevadores do sistema, o sistema sempre escolhe, para atender uma chamada de corredor, aquele com o menor valor de `cost` para aquele andar e direção. Essa comparação é feita por um quantificador universal que percorre todo o conjunto `ELEVATOR`, portanto continua válida qualquer que seja o número de executados/elevadores configurado.
 *Modelo:* operações `AssignElevatorUp` / `AssignElevatorDown`, que selecionam `ee` tal que `∀ee2·(ee2:ELEVATOR ⇒ cost(ee,ff,dd) ≤ cost(ee2,ff,dd))`.
 
 ## 4. Tabela de Rastreabilidade
 
 | Regra | Elemento do modelo B |
 |---|---|
-| RN01 | parâmetro `nbElevators : NAT1`, `ELEVATOR` |
-| RN02 | parâmetro `maxFloor : NAT1`, `FLOOR` |
+| RN01 | constante `NB_ELEVATORS` e conjunto `ELEVATOR == 1..NB_ELEVATORS` |
+| RN02 | constante `MAX_FLOOR` e conjunto `MAX_FLOOR == 9`, onde `9` pode ser quaquer valor concreto |
 | RN03 | `RequestHallUp`, `RequestHallDown`, `RequestCabin` |
-| RN04 | pré-condição `ff < maxFloor` (`RequestHallUp`) |
+| RN04 | pré-condição `ff < MAX_FLOOR` (`RequestHallUp`) |
 | RN05 | pré-condição `ff > 0` (`RequestHallDown`) |
 | RN06 | pré-condições de não duplicação |
 | RN07 | pré-condição em `RequestCabin` |
@@ -115,18 +115,3 @@ Entre os n elevadores do sistema, o sistema sempre escolhe, para atender uma cha
 | RN15 | ramo `ELSE` de `cost` |
 | RN16 | quantificador de minimalidade em `AssignElevatorUp/Down`, sobre todo `ELEVATOR` |
 
-## 5. Alterações em relação à versão de 4 elevadores
-
-- `nbElevators` deixou de ser uma constante fixa (`= 4`) e passou a ser **parâmetro de máquina**, tipado na cláusula `CONSTRAINTS` como qualquer natural positivo (`NAT1`).
-- Nenhuma regra de negócio de comportamento (despacho único, roteamento, eficiência energética) precisou mudar de lógica — todas já eram expressas com quantificadores sobre o conjunto `ELEVATOR`, e por isso generalizam automaticamente para n elevadores.
-- Ao animar a máquina no ProB, será solicitado um valor para `nbElevators` (e `maxFloor`) no momento da instanciação/animação, permitindo testar o sistema com diferentes tamanhos de frota (ex.: 2, 4, 8 elevadores) sem alterar o modelo.
-
-## 5.1 Nota técnica: convenção de nomes no B
-
-Os parâmetros da máquina foram nomeados com letra minúscula inicial (`maxFloor`, `nbElevators`) e não com maiúscula. Isso é obrigatório: no B, um identificador que começa com letra **maiúscula** é interpretado como nome de **conjunto** (SET); como esses dois parâmetros são escalares (números inteiros), usar maiúscula inicial faz o ProB tentar tipá-los como conjunto, gerando erro de carregamento da máquina (`Type mismatch: Expected INTEGER, but was POW(_A)`).
-
-## 6. Observações
-
-- As regras RN08 e RN16 continuam sendo as que formalizam diretamente os requisitos 4 e 5 do enunciado (despacho único e eficiência energética), agora válidas para n elevadores.
-- A regra RN10 formaliza o requisito 3 (elevador decide a melhor rota), atualmente pela heurística "andar-alvo mais próximo"; pode ser refinada futuramente para uma lógica de varredura (SCAN/LOOK).
-- Regras temporais (ex.: "toda chamada é eventualmente atendida") não são cobertas por este documento nem pela máquina B clássica — exigiriam verificação via LTL no ProB.
