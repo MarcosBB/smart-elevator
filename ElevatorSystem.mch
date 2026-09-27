@@ -18,13 +18,17 @@ MACHINE ElevatorSystem
 SEES ElevatorContext
 
 DEFINITIONS
-    FLOORS    == 0..MAX_FLOOR;
-    ELEVATORS == 1..ELEVATOR_COUNT;
+    FLOORS    == (0..MAX_FLOOR);
+    ELEVATORS == (1..ELEVATOR_COUNT);
 
     /* distância (em andares) entre dois andares
        (max{a-b,b-a} evita IF-como-expressão, que só o ProB aceita
        e o Atelier-B rejeita) */
     distance(from_floor, to_floor) == max({from_floor - to_floor, to_floor - from_floor});
+
+    /* quadrado da distância: preserva a ordem entre distâncias e não
+       gera obrigação de boa definição (ao contrário de max) */
+    squared_distance(from_floor, to_floor) == (from_floor - to_floor) * (from_floor - to_floor);
 
     /* o elevador, andando na direção da chamada, ainda não "passou"
        pelo andar da chamada (ela está no caminho dele) */
@@ -45,11 +49,12 @@ DEFINITIONS
     );
 
     /* converte o predicado needs_detour em 0 ou MAX_FLOOR, para uso
-       aritmético (card de um conjunto por compreensão é o idioma
-       clássico de B para transformar um predicado em inteiro sem
-       usar IF-expressão) */
+       aritmético: bool(...) vira TRUE/FALSE e BOOL_TO_NAT (constante
+       do contexto) vira 1/0, sem usar IF-expressão. Substitui o antigo
+       card({x | x : {0} & P}), cuja boa definição (conjunto finito)
+       o provador do Atelier-B não conseguia demonstrar */
     detour_penalty(elevator, call_floor, call_direction) == (
-        MAX_FLOOR * card({marker | marker : {0} & needs_detour(elevator, call_floor, call_direction)})
+        MAX_FLOOR * BOOL_TO_NAT(bool(needs_detour(elevator, call_floor, call_direction)))
     );
 
     /* custo energético estimado de enviar o elevador para atender
@@ -97,9 +102,12 @@ INVARIANT
     dom(assigned_up_calls)   <: 0..(MAX_FLOOR-1) &
     dom(assigned_down_calls) <: 1..MAX_FLOOR     &
 
-    /* portas só abrem com o elevador parado */
-    !elevator.(elevator : ELEVATORS & doors_open(elevator) = TRUE =>
-               travel_direction(elevator) = idle)
+    /* portas só abrem com o elevador parado:
+       {elevadores com porta aberta} <: {elevadores parados}.
+       Equivale a !e.(doors_open(e)=TRUE => travel_direction(e)=idle),
+       mas na forma de conjuntos o provador do Atelier-B consegue
+       provar a preservação automaticamente */
+    doors_open~[{TRUE}] <: travel_direction~[{idle}]
 
 ASSERTIONS
     /* ELEVATOR_COUNT>=1 (garantido em PROPERTIES da máquina de contexto)
@@ -111,9 +119,9 @@ ASSERTIONS
     ELEVATOR_COUNT >= 1
 
 INITIALISATION
-    current_floor       := %elevator.(elevator : ELEVATORS | 0)     ||
-    travel_direction    := %elevator.(elevator : ELEVATORS | idle)  ||
-    doors_open          := %elevator.(elevator : ELEVATORS | FALSE) ||
+    current_floor       := ELEVATORS * {0}     ||
+    travel_direction    := ELEVATORS * {idle}  ||
+    doors_open          := ELEVATORS * {FALSE} ||
     cabin_requests      := {} ||
     pending_up_calls    := {} ||
     pending_down_calls  := {} ||
@@ -267,16 +275,22 @@ OPERATIONS
                           assigned_down_calls~[{elevator}]
             IN
                 IF targets /= {} & current_floor(elevator) /: targets THEN
+                    /* "nearest_target : FLOORS" é redundante (targets <: FLOORS),
+                       mas dá ao provador o limite 0..MAX_FLOOR que garante que
+                       current_floor +1/-1 continua dentro de FLOORS */
                     ANY nearest_target WHERE
-                        nearest_target : targets &
+                        nearest_target : targets & nearest_target : FLOORS &
                         !other_target.(other_target : targets =>
-                            distance(current_floor(elevator), nearest_target) <=
-                            distance(current_floor(elevator), other_target))
+                            squared_distance(current_floor(elevator), nearest_target) <=
+                            squared_distance(current_floor(elevator), other_target))
                     THEN
                         IF nearest_target > current_floor(elevator) THEN
                             current_floor(elevator)    := current_floor(elevator) + 1 ||
                             travel_direction(elevator) := up
-                        ELSE
+                        /* ELSIF em vez de ELSE: o caso "igual" nunca ocorre
+                           (current_floor /: targets), mas explicitar "<" deixa
+                           a prova de current_floor - 1 >= 0 direta */
+                        ELSIF nearest_target < current_floor(elevator) THEN
                             current_floor(elevator)    := current_floor(elevator) - 1 ||
                             travel_direction(elevator) := down
                         END
@@ -307,10 +321,15 @@ OPERATIONS
                 current_floor(elevator) : assigned_down_calls~[{elevator}]
             )
         THEN
+            /* assigned_*_calls: remove o andar atual SÓ se ele estiver
+               atribuído a este elevador. Escrito com <<| (subtração de
+               domínio) em vez de "f - {andar |-> elevador}", porque o
+               provador demonstra automaticamente que <<| preserva
+               FLOORS +-> ELEVATORS */
             doors_open(elevator)       := TRUE                                                  ||
             cabin_requests             := cabin_requests      - {elevator |-> current_floor(elevator)} ||
-            assigned_up_calls          := assigned_up_calls   - {current_floor(elevator) |-> elevator} ||
-            assigned_down_calls        := assigned_down_calls - {current_floor(elevator) |-> elevator} ||
+            assigned_up_calls          := ({current_floor(elevator)} /\ assigned_up_calls~[{elevator}])   <<| assigned_up_calls   ||
+            assigned_down_calls        := ({current_floor(elevator)} /\ assigned_down_calls~[{elevator}]) <<| assigned_down_calls ||
             travel_direction(elevator) := idle
         END;
 

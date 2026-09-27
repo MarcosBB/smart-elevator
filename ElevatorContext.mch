@@ -20,7 +20,8 @@ SETS
 
 CONSTANTS
     MAX_FLOOR,          // último andar (os andares vão de 0 a MAX_FLOOR)
-    ELEVATOR_COUNT      // quantidade de elevadores do prédio
+    ELEVATOR_COUNT,     // quantidade de elevadores do prédio
+    BOOL_TO_NAT         // converte BOOL em 0/1 (FALSE -> 0, TRUE -> 1)
 
 PROPERTIES
     /* usa INTEGER + >=1 em vez de NAT1: NAT1 é o conjunto de naturais
@@ -31,6 +32,8 @@ PROPERTIES
     MAX_FLOOR      : INTEGER & MAX_FLOOR      >= 1  &
     ELEVATOR_COUNT : INTEGER & ELEVATOR_COUNT >= 1  &
     MAX_FLOOR      = 9                              &   /* <<< edite aqui o nº de andares (>=1) */
-    ELEVATOR_COUNT = 4                                  /* <<< edite aqui o nº de elevadores (>=1) */
+    ELEVATOR_COUNT = 4                              &   /* <<< edite aqui o nº de elevadores (>=1) */
+    BOOL_TO_NAT    : BOOL --> {0, 1}                &
+    BOOL_TO_NAT    = {FALSE |-> 0, TRUE |-> 1}
 
 END

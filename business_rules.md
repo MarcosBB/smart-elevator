@@ -67,11 +67,11 @@ Assim que um elevador é designado para uma chamada de corredor, ela deixa de ap
 
 **RN10 — O elevador escolhe sua própria rota entre os destinos pendentes.**
 Cada elevador, a cada movimento, avalia todos os seus alvos pendentes (destinos de cabine + chamadas de corredor a ele atribuídas) e se desloca em direção ao alvo mais próximo, evitando reversões desnecessárias.
-*Modelo:* operação `MoveOneStep`, que calcula `targets = cabin_requests[{elevator}] ∪ assigned_up_calls~[{elevator}] ∪ assigned_down_calls~[{elevator}]` e escolhe o alvo de menor distância (`distance`).
+*Modelo:* operação `MoveOneStep`, que calcula `targets = cabin_requests[{elevator}] ∪ assigned_up_calls~[{elevator}] ∪ assigned_down_calls~[{elevator}]` e escolhe o alvo de menor distância (comparada por `squared_distance`, que preserva a ordem entre distâncias sem gerar obrigação de boa definição).
 
 **RN11 — Elevador não se move com as portas abertas.**
 Um elevador só inicia deslocamento se suas portas estiverem fechadas.
-*Modelo:* invariante `doors_open(elevator)=TRUE ⇒ travel_direction(elevator)=idle`; pré-condição `doors_open(elevator)=FALSE` em `MoveOneStep`.
+*Modelo:* invariante `doors_open~[{TRUE}] <: travel_direction~[{idle}]` (todo elevador com porta aberta está parado); pré-condição `doors_open(elevator)=FALSE` em `MoveOneStep`.
 
 **RN12 — Chegada ao andar-alvo abre as portas e limpa a chamada atendida.**
 Ao alcançar um andar que é destino de cabine ou chamada de corredor atribuída a ele, o elevador abre as portas e remove essa chamada de sua lista de pendências.
@@ -89,7 +89,7 @@ Na escolha do elevador para atender uma chamada de corredor, o sistema prioriza,
 
 **RN15 — Penalização de elevadores desalinhados.**
 Um elevador parado longe do andar, ou em movimento na direção contrária, ou que já ultrapassou o andar solicitado, recebe uma penalidade adicional no cálculo de custo, tornando-o menos provável de ser escolhido.
-*Modelo:* `needs_detour(elevator, call_floor, call_direction)` identifica essa condição; `detour_penalty(elevator, call_floor, call_direction) == MAX_FLOOR * card({marker | marker:{0} & needs_detour(elevator, call_floor, call_direction)})` soma `MAX_FLOOR` à distância nesse caso (equivalente ao antigo ramo `ELSE`, agora expresso sem `IF`-como-expressão para compatibilidade com o Atelier-B); `dispatch_cost(elevator, call_floor, call_direction) == distance(current_floor(elevator), call_floor) + detour_penalty(elevator, call_floor, call_direction)`.
+*Modelo:* `needs_detour(elevator, call_floor, call_direction)` identifica essa condição; `detour_penalty(elevator, call_floor, call_direction) == MAX_FLOOR * BOOL_TO_NAT(bool(needs_detour(elevator, call_floor, call_direction)))` soma `MAX_FLOOR` à distância nesse caso (sem `IF`-como-expressão, para compatibilidade com o Atelier-B; `BOOL_TO_NAT = {FALSE |-> 0, TRUE |-> 1}` é constante da máquina de contexto); `dispatch_cost(elevator, call_floor, call_direction) == distance(current_floor(elevator), call_floor) + detour_penalty(elevator, call_floor, call_direction)`.
 
 **RN16 — Seleção do elevador de menor custo entre os n disponíveis.**
 Entre os n elevadores do sistema, o sistema sempre escolhe, para atender uma chamada de corredor, aquele com o menor valor de `dispatch_cost` para aquele andar e direção. Essa comparação é feita por um quantificador universal que percorre todo o conjunto `ELEVATORS`, portanto continua válida qualquer que seja o número de elevadores configurado.
@@ -115,10 +115,10 @@ Como a interface (gráfica ou por prompt) não contém lógica de validação pr
 | RN08 | tipo `FLOORS +-> ELEVATORS`; invariantes de disjunção e de domínio (`dom(assigned_up_calls) <: 0..(MAX_FLOOR-1)`, `dom(assigned_down_calls) <: 1..MAX_FLOOR`) |
 | RN09 | `AssignElevatorUp`, `AssignElevatorDown` |
 | RN10 | `MoveOneStep`, `targets` |
-| RN11 | invariante `doors_open ⇒ travel_direction=idle` |
+| RN11 | invariante `doors_open~[{TRUE}] <: travel_direction~[{idle}]` |
 | RN12 | `OpenDoors` |
 | RN13 | `CloseDoors` |
 | RN14 | `is_on_the_way` (usada em `needs_detour`) |
-| RN15 | `needs_detour`, `detour_penalty` |
+| RN15 | `needs_detour`, `detour_penalty`, `BOOL_TO_NAT` |
 | RN16 | quantificador de minimalidade em `AssignElevatorUp/Down`, sobre todo `ELEVATORS`; viabilidade garantida por `ASSERTIONS ELEVATOR_COUNT >= 1` |
 | RN17 | operações `_OK` (`RequestHallUp_OK`, `RequestHallDown_OK`, `AssignElevatorUp_OK`, `AssignElevatorDown_OK`, `RequestCabin_OK`, `MoveOneStep_OK`, `OpenDoors_OK`, `CloseDoors_OK`) |
