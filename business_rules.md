@@ -23,11 +23,11 @@ O sistema gerencia um grupo de **n elevadores** (n ≥ 1, configurável) que ate
 
 **RN01 — Quantidade configurável de elevadores.**
 O sistema opera com várias quantidades diferentes de elevadores, onde **NB_ELEVATORS** define a quantidade de elevadores.
-*Modelo:* `NB_ELEVATORS` é uma **CONSTANT** da máquina de contexto `ElevatorContext`, restrita em `PROPERTIES` a `NAT1` (ou seja, ≥ 1 — a obrigação de prova correspondente é gerada e verificável no Atelier-B). `ElevatorSystem` a enxerga via `SEES ElevatorContext` e define, em `DEFINITIONS`, `ELEVATOR == 1..NB_ELEVATORS`.
+*Modelo:* `NB_ELEVATORS` é uma **CONSTANT** da máquina de contexto `ElevatorContext`, restrita em `PROPERTIES` a `INTEGER & NB_ELEVATORS >= 1` (evita depender da preferência `MAXINT` do ProB, ao contrário de `NAT1`; a obrigação de prova correspondente é gerada e verificável no Atelier-B). `ElevatorSystem` a enxerga via `SEES ElevatorContext` e define, em `DEFINITIONS`, `ELEVATOR == 1..NB_ELEVATORS`.
 
 **RN02 — Faixa de andares.**
 Os andares são numerados de `0` (térreo) até `MAX_FLOOR`, também configurável por edifício.
-*Modelo:* `MAX_FLOOR` é uma **CONSTANT** da máquina de contexto `ElevatorContext`, restrita em `PROPERTIES` a `NAT1` e fixada por igualdade (`MAX_FLOOR = 9`, onde `9` pode ser qualquer valor concreto ≥ 1). `ElevatorSystem` define, em `DEFINITIONS`, `FLOOR == 0..MAX_FLOOR`.
+*Modelo:* `MAX_FLOOR` é uma **CONSTANT** da máquina de contexto `ElevatorContext`, restrita em `PROPERTIES` a `INTEGER & MAX_FLOOR >= 1` e fixada por igualdade (`MAX_FLOOR = 9`, onde `9` pode ser qualquer valor concreto ≥ 1). `ElevatorSystem` define, em `DEFINITIONS`, `FLOOR == 0..MAX_FLOOR`.
 
 ### 3.2 Entrada de requisições
 
@@ -105,8 +105,8 @@ Como a interface (gráfica ou por prompt) não contém lógica de validação pr
 
 | Regra | Elemento do modelo B |
 |---|---|
-| RN01 | `CONSTANTS NB_ELEVATORS` (`ElevatorContext`, `PROPERTIES: NAT1`); `ELEVATOR == 1..NB_ELEVATORS` |
-| RN02 | `CONSTANTS MAX_FLOOR` (`ElevatorContext`, `PROPERTIES: NAT1`, fixado por igualdade); `FLOOR == 0..MAX_FLOOR` |
+| RN01 | `CONSTANTS NB_ELEVATORS` (`ElevatorContext`, `PROPERTIES: INTEGER & >= 1`); `ELEVATOR == 1..NB_ELEVATORS` |
+| RN02 | `CONSTANTS MAX_FLOOR` (`ElevatorContext`, `PROPERTIES: INTEGER & >= 1`, fixado por igualdade); `FLOOR == 0..MAX_FLOOR` |
 | RN03 | `RequestHallUp`, `RequestHallDown`, `RequestCabin` |
 | RN04 | pré-condição `ff < MAX_FLOOR` (`RequestHallUp`) + invariante `hall_up <: 0..(MAX_FLOOR-1)` |
 | RN05 | pré-condição `ff > 0` (`RequestHallDown`) + invariante `hall_down <: 1..MAX_FLOOR` |
