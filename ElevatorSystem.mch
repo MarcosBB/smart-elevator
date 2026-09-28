@@ -4,7 +4,7 @@ MACHINE ElevatorSystem
    Sistema de Elevador Inteligente - Máquina Abstrata em B-Method
    -----------------------------------------------------------------
 
-   MAX_FLOOR e NB_ELEVATORS agora são CONSTANTS da máquina de contexto
+   MAX_FLOOR e ELEVATOR_COUNT são CONSTANTS da máquina de contexto
    ElevatorContext (ver esse arquivo), verificadas por PROPERTIES.
    Para mudar o nº de andares/elevadores, edite ElevatorContext.mch.
 
@@ -18,303 +18,354 @@ MACHINE ElevatorSystem
 SEES ElevatorContext
 
 DEFINITIONS
-    FLOOR == 0..MAX_FLOOR;
-    ELEVATOR == 1..NB_ELEVATORS;
+    FLOORS    == (0..MAX_FLOOR);
+    ELEVATORS == (1..ELEVATOR_COUNT);
 
-    /* distância absoluta entre dois andares
-       (max{xx-yy,yy-xx} evita IF-como-expressão, que só o ProB aceita
+    /* distância (em andares) entre dois andares
+       (max{a-b,b-a} evita IF-como-expressão, que só o ProB aceita
        e o Atelier-B rejeita) */
-    abs_diff(xx,yy) == max({xx-yy,yy-xx});
+    distance(from_floor, to_floor) == max({from_floor - to_floor, to_floor - from_floor});
 
-    /* o elevador ee, na direção dd, ainda não "passou" pelo andar ff */
-    is_aligned(ee,ff,dd) == (
-        (dd=up   & ff >= position(ee)) or
-        (dd=down & ff <= position(ee))
+    /* quadrado da distância: preserva a ordem entre distâncias e não
+       gera obrigação de boa definição (ao contrário de max) */
+    squared_distance(from_floor, to_floor) == (from_floor - to_floor) * (from_floor - to_floor);
+
+    /* o elevador, andando na direção da chamada, ainda não "passou"
+       pelo andar da chamada (ela está no caminho dele) */
+    is_on_the_way(elevator, call_floor, call_direction) == (
+        (call_direction = up   & call_floor >= current_floor(elevator)) or
+        (call_direction = down & call_floor <= current_floor(elevator))
     );
 
-    /* verdadeiro quando o elevador ee precisaria inverter (ou já passou)
-       para atender uma chamada no andar ff, direção dd */
-    is_penalized(ee,ff,dd) == (
-        not(direction(ee) = none or (direction(ee) = dd & is_aligned(ee,ff,dd)))
+    /* verdadeiro quando o elevador precisaria inverter o sentido (ou
+       já passou do andar) para atender a chamada: ele não está parado
+       nem vem na mesma direção com a chamada no caminho */
+    needs_detour(elevator, call_floor, call_direction) == (
+        not(
+            travel_direction(elevator) = idle or
+            (travel_direction(elevator) = call_direction &
+             is_on_the_way(elevator, call_floor, call_direction))
+        )
     );
 
-    /* converte o predicado is_penalized em 0 ou 1, para uso aritmético
-       (card de um conjunto por compreensão é o idioma clássico de B
-       para transformar um predicado em inteiro sem usar IF-expressão) */
-    penalty(ee,ff,dd) == (
-        MAX_FLOOR * card({xx | xx : {0} & is_penalized(ee,ff,dd)})
+    /* converte o predicado needs_detour em 0 ou MAX_FLOOR, para uso
+       aritmético: bool(...) vira TRUE/FALSE e BOOL_TO_NAT (constante
+       do contexto) vira 1/0, sem usar IF-expressão. Substitui o antigo
+       card({x | x : {0} & P}), cuja boa definição (conjunto finito)
+       o provador do Atelier-B não conseguia demonstrar */
+    detour_penalty(elevator, call_floor, call_direction) == (
+        MAX_FLOOR * BOOL_TO_NAT(bool(needs_detour(elevator, call_floor, call_direction)))
     );
 
-    /* custo energético estimado de enviar o elevador ee para atender
-       uma chamada de corredor no andar ff, direção dd:
-         - elevador parado, ou já alinhado (mesma direção, ainda não
-           passou): custo = distância
-         - elevador desalinhado (precisaria inverter ou já passou):
+    /* custo energético estimado de enviar o elevador para atender
+       uma chamada de corredor no andar call_floor, direção call_direction:
+         - elevador parado, ou já vindo na mesma direção sem ter
+           passado do andar: custo = distância
+         - caso contrário (precisaria inverter ou já passou):
            distância + penalidade extra (MAX_FLOOR) */
-    cost(ee,ff,dd) == (
-        abs_diff(position(ee),ff) + penalty(ee,ff,dd)
+    dispatch_cost(elevator, call_floor, call_direction) == (
+        distance(current_floor(elevator), call_floor) +
+        detour_penalty(elevator, call_floor, call_direction)
     )
 
 VARIABLES
-    position,       // andar atual de cada elevador
-    direction,      // direção atual de cada elevador (up, down, none)
-    door_open,      // estado das portas de cada elevador
-    cabin_calls,    // destinos pedidos de dentro dos elevadores
-    hall_up,        // chamadas de "subir" pendentes (não atribuídas)
-    hall_down,      // chamadas de "descer" pendentes (não atribuídas)
-    assign_up,      // chamadas de "subir" já atribuídas a um elevador
-    assign_down     // chamadas de "descer" já atribuídas a um elevador
+    current_floor,          // andar atual de cada elevador
+    travel_direction,       // direção atual de cada elevador (up, down, idle)
+    doors_open,             // se as portas de cada elevador estão abertas
+    cabin_requests,         // destinos pedidos de dentro das cabines (elevador |-> andar)
+    pending_up_calls,       // chamadas de "subir" ainda sem elevador atribuído
+    pending_down_calls,     // chamadas de "descer" ainda sem elevador atribuído
+    assigned_up_calls,      // chamadas de "subir" já atribuídas (andar |-> elevador)
+    assigned_down_calls     // chamadas de "descer" já atribuídas (andar |-> elevador)
 
 INVARIANT
-    position    : ELEVATOR --> FLOOR    &
-    direction   : ELEVATOR --> DIRECTION &
-    door_open   : ELEVATOR --> BOOL      &
-    cabin_calls : ELEVATOR <-> FLOOR     &
-    hall_up     <: FLOOR                 &
-    hall_down   <: FLOOR                 &
-    assign_up   : FLOOR +-> ELEVATOR     &
-    assign_down : FLOOR +-> ELEVATOR     &
+    current_floor       : ELEVATORS --> FLOORS    &
+    travel_direction    : ELEVATORS --> DIRECTION &
+    doors_open          : ELEVATORS --> BOOL      &
+    cabin_requests      : ELEVATORS <-> FLOORS    &
+    pending_up_calls    <: FLOORS                 &
+    pending_down_calls  <: FLOORS                 &
+    assigned_up_calls   : FLOORS +-> ELEVATORS    &
+    assigned_down_calls : FLOORS +-> ELEVATORS    &
 
     /* uma chamada está pendente OU já atribuída, nunca as duas coisas
        -> garante que cada chamada é servida por um único elevador,
           qualquer que seja o número de elevadores do sistema */
-    hall_up   /\ dom(assign_up)   = {}   &
-    hall_down /\ dom(assign_down) = {}   &
+    pending_up_calls   /\ dom(assigned_up_calls)   = {} &
+    pending_down_calls /\ dom(assigned_down_calls) = {} &
 
     /* requisitos de segurança elevados de PRE para o INVARIANT:
        não existe (nem pode existir em nenhum estado observável)
        chamada de subida no último andar, nem de descida no térreo */
-    hall_up          <: 0..(MAX_FLOOR-1) &
-    hall_down        <: 1..MAX_FLOOR     &
-    dom(assign_up)   <: 0..(MAX_FLOOR-1) &
-    dom(assign_down) <: 1..MAX_FLOOR     &
+    pending_up_calls         <: 0..(MAX_FLOOR-1) &
+    pending_down_calls       <: 1..MAX_FLOOR     &
+    dom(assigned_up_calls)   <: 0..(MAX_FLOOR-1) &
+    dom(assigned_down_calls) <: 1..MAX_FLOOR     &
 
-    /* portas só abrem com o elevador parado */
-    !ee.(ee:ELEVATOR & door_open(ee)=TRUE => direction(ee)=none)
+    /* portas só abrem com o elevador parado:
+       {elevadores com porta aberta} <: {elevadores parados}.
+       Equivale a !e.(doors_open(e)=TRUE => travel_direction(e)=idle),
+       mas na forma de conjuntos o provador do Atelier-B consegue
+       provar a preservação automaticamente */
+    doors_open~[{TRUE}] <: travel_direction~[{idle}]
 
 ASSERTIONS
-    /* NB_ELEVATORS>=1 (garantido em PROPERTIES da máquina de contexto)
-       assegura que ELEVATOR é não-vazio, logo a busca por um elevador
+    /* ELEVATOR_COUNT>=1 (garantido em PROPERTIES da máquina de contexto)
+       assegura que ELEVATORS é não-vazio, logo a busca por um elevador
        de custo mínimo em AssignElevatorUp/AssignElevatorDown e por um
        andar-alvo mais próximo em MoveOneStep sempre tem testemunha.
        Deixado explícito aqui como lema de apoio ao provador; pode
        exigir uma prova interativa simples em Atelier-B. */
-    NB_ELEVATORS >= 1
+    ELEVATOR_COUNT >= 1
 
 INITIALISATION
-    position    := %ee.(ee:ELEVATOR|0)      ||
-    direction   := %ee.(ee:ELEVATOR|none)   ||
-    door_open   := %ee.(ee:ELEVATOR|FALSE)  ||
-    cabin_calls := {}                        ||
-    hall_up     := {}                        ||
-    hall_down   := {}                        ||
-    assign_up   := {}                        ||
-    assign_down := {}
+    current_floor       := ELEVATORS * {0}     ||
+    travel_direction    := ELEVATORS * {idle}  ||
+    doors_open          := ELEVATORS * {FALSE} ||
+    cabin_requests      := {} ||
+    pending_up_calls    := {} ||
+    pending_down_calls  := {} ||
+    assigned_up_calls   := {} ||
+    assigned_down_calls := {}
 
 OPERATIONS
 
     /* ---------- Requisito 2: botões de andar (subir/descer) ---------- */
 
-    RequestHallUp(ff) =
+    RequestHallUp(requested_floor) =
         PRE
-            ff : FLOOR & ff < MAX_FLOOR &
-            ff /: hall_up & ff /: dom(assign_up)
+            requested_floor : FLOORS & requested_floor < MAX_FLOOR &
+            requested_floor /: pending_up_calls &
+            requested_floor /: dom(assigned_up_calls)
         THEN
-            hall_up := hall_up \/ {ff}
+            pending_up_calls := pending_up_calls \/ {requested_floor}
         END;
 
-    bb <-- RequestHallUp_OK(ff) =
+    is_valid <-- RequestHallUp_OK(requested_floor) =
         PRE
-            ff : INTEGER
+            requested_floor : INTEGER
         THEN
-            IF ff : FLOOR THEN
-                bb := bool(ff < MAX_FLOOR & ff /: hall_up & ff /: dom(assign_up))
+            IF requested_floor : FLOORS THEN
+                is_valid := bool(
+                    requested_floor < MAX_FLOOR &
+                    requested_floor /: pending_up_calls &
+                    requested_floor /: dom(assigned_up_calls)
+                )
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
-    RequestHallDown(ff) =
+    RequestHallDown(requested_floor) =
         PRE
-            ff : FLOOR & ff > 0 &
-            ff /: hall_down & ff /: dom(assign_down)
+            requested_floor : FLOORS & requested_floor > 0 &
+            requested_floor /: pending_down_calls &
+            requested_floor /: dom(assigned_down_calls)
         THEN
-            hall_down := hall_down \/ {ff}
+            pending_down_calls := pending_down_calls \/ {requested_floor}
         END;
 
-    bb <-- RequestHallDown_OK(ff) =
+    is_valid <-- RequestHallDown_OK(requested_floor) =
         PRE
-            ff : INTEGER
+            requested_floor : INTEGER
         THEN
-            IF ff : FLOOR THEN
-                bb := bool(ff > 0 & ff /: hall_down & ff /: dom(assign_down))
+            IF requested_floor : FLOORS THEN
+                is_valid := bool(
+                    requested_floor > 0 &
+                    requested_floor /: pending_down_calls &
+                    requested_floor /: dom(assigned_down_calls)
+                )
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
     /* ---- Requisitos 4 e 5: despacho de UM elevador, o mais eficiente ----
-       O quantificador universal !ee2.(ee2:ELEVATOR => ...) percorre todos
-       os n elevadores, portanto a regra de escolha do mínimo custo é
-       válida para qualquer número de elevadores configurado. ---- */
+       O quantificador universal !other_elevator.(... => ...) percorre
+       todos os elevadores, portanto a regra de escolha do mínimo custo
+       é válida para qualquer número de elevadores configurado. ---- */
 
-    AssignElevatorUp(ff) =
+    AssignElevatorUp(call_floor) =
         PRE
-            ff : hall_up
+            call_floor : pending_up_calls
         THEN
-            ANY ee WHERE
-                ee : ELEVATOR &
-                !ee2.(ee2:ELEVATOR => cost(ee,ff,up) <= cost(ee2,ff,up))
+            ANY chosen_elevator WHERE
+                chosen_elevator : ELEVATORS &
+                !other_elevator.(other_elevator : ELEVATORS =>
+                    dispatch_cost(chosen_elevator, call_floor, up) <=
+                    dispatch_cost(other_elevator,  call_floor, up))
             THEN
-                hall_up   := hall_up - {ff}          ||
-                assign_up := assign_up \/ {ff|->ee}
+                pending_up_calls  := pending_up_calls - {call_floor} ||
+                assigned_up_calls := assigned_up_calls \/ {call_floor |-> chosen_elevator}
             END
         END;
 
-    bb <-- AssignElevatorUp_OK(ff) =
+    is_valid <-- AssignElevatorUp_OK(call_floor) =
         PRE
-            ff : INTEGER
+            call_floor : INTEGER
         THEN
-            IF ff : FLOOR THEN
-                bb := bool(ff : hall_up)
+            IF call_floor : FLOORS THEN
+                is_valid := bool(call_floor : pending_up_calls)
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
-    AssignElevatorDown(ff) =
+    AssignElevatorDown(call_floor) =
         PRE
-            ff : hall_down
+            call_floor : pending_down_calls
         THEN
-            ANY ee WHERE
-                ee : ELEVATOR &
-                !ee2.(ee2:ELEVATOR => cost(ee,ff,down) <= cost(ee2,ff,down))
+            ANY chosen_elevator WHERE
+                chosen_elevator : ELEVATORS &
+                !other_elevator.(other_elevator : ELEVATORS =>
+                    dispatch_cost(chosen_elevator, call_floor, down) <=
+                    dispatch_cost(other_elevator,  call_floor, down))
             THEN
-                hall_down   := hall_down - {ff}          ||
-                assign_down := assign_down \/ {ff|->ee}
+                pending_down_calls  := pending_down_calls - {call_floor} ||
+                assigned_down_calls := assigned_down_calls \/ {call_floor |-> chosen_elevator}
             END
         END;
 
-    bb <-- AssignElevatorDown_OK(ff) =
+    is_valid <-- AssignElevatorDown_OK(call_floor) =
         PRE
-            ff : INTEGER
+            call_floor : INTEGER
         THEN
-            IF ff : FLOOR THEN
-                bb := bool(ff : hall_down)
+            IF call_floor : FLOORS THEN
+                is_valid := bool(call_floor : pending_down_calls)
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
     /* ---------- Requisito 3: botões de destino dentro da cabine ---------- */
 
-    RequestCabin(ee,ff) =
+    RequestCabin(elevator, destination_floor) =
         PRE
-            ee : ELEVATOR & ff : FLOOR &
-            ff /= position(ee) & ff /: cabin_calls[{ee}]
+            elevator : ELEVATORS & destination_floor : FLOORS &
+            destination_floor /= current_floor(elevator) &
+            destination_floor /: cabin_requests[{elevator}]
         THEN
-            cabin_calls := cabin_calls \/ {ee|->ff}
+            cabin_requests := cabin_requests \/ {elevator |-> destination_floor}
         END;
 
-    bb <-- RequestCabin_OK(ee,ff) =
+    is_valid <-- RequestCabin_OK(elevator, destination_floor) =
         PRE
-            ee : INTEGER & ff : INTEGER
+            elevator : INTEGER & destination_floor : INTEGER
         THEN
-            IF ee : ELEVATOR & ff : FLOOR THEN
-                bb := bool(ff /= position(ee) & ff /: cabin_calls[{ee}])
+            IF elevator : ELEVATORS & destination_floor : FLOORS THEN
+                is_valid := bool(
+                    destination_floor /= current_floor(elevator) &
+                    destination_floor /: cabin_requests[{elevator}]
+                )
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
     /* ---------- Requisito 3: elevador escolhe a melhor rota ---------- */
 
-    MoveOneStep(ee) =
+    MoveOneStep(elevator) =
         PRE
-            ee : ELEVATOR & door_open(ee) = FALSE
+            elevator : ELEVATORS & doors_open(elevator) = FALSE
         THEN
             LET targets BE
-                targets = cabin_calls[{ee}] \/ assign_up~[{ee}] \/ assign_down~[{ee}]
+                /* todos os andares que este elevador precisa visitar */
+                targets = cabin_requests[{elevator}]       \/
+                          assigned_up_calls~[{elevator}]   \/
+                          assigned_down_calls~[{elevator}]
             IN
-                IF targets /= {} & position(ee) /: targets THEN
-                    ANY nf WHERE
-                        nf : targets &
-                        !ff2.(ff2:targets => abs_diff(position(ee),nf) <= abs_diff(position(ee),ff2))
+                IF targets /= {} & current_floor(elevator) /: targets THEN
+                    /* "nearest_target : FLOORS" é redundante (targets <: FLOORS),
+                       mas dá ao provador o limite 0..MAX_FLOOR que garante que
+                       current_floor +1/-1 continua dentro de FLOORS */
+                    ANY nearest_target WHERE
+                        nearest_target : targets & nearest_target : FLOORS &
+                        !other_target.(other_target : targets =>
+                            squared_distance(current_floor(elevator), nearest_target) <=
+                            squared_distance(current_floor(elevator), other_target))
                     THEN
-                        IF nf > position(ee) THEN
-                            position(ee)  := position(ee) + 1 ||
-                            direction(ee) := up
-                        ELSE
-                            position(ee)  := position(ee) - 1 ||
-                            direction(ee) := down
+                        IF nearest_target > current_floor(elevator) THEN
+                            current_floor(elevator)    := current_floor(elevator) + 1 ||
+                            travel_direction(elevator) := up
+                        /* ELSIF em vez de ELSE: o caso "igual" nunca ocorre
+                           (current_floor /: targets), mas explicitar "<" deixa
+                           a prova de current_floor - 1 >= 0 direta */
+                        ELSIF nearest_target < current_floor(elevator) THEN
+                            current_floor(elevator)    := current_floor(elevator) - 1 ||
+                            travel_direction(elevator) := down
                         END
                     END
                 END
             END
         END;
 
-    bb <-- MoveOneStep_OK(ee) =
+    is_valid <-- MoveOneStep_OK(elevator) =
         PRE
-            ee : INTEGER
+            elevator : INTEGER
         THEN
-            IF ee : ELEVATOR THEN
-                bb := bool(door_open(ee) = FALSE)
+            IF elevator : ELEVATORS THEN
+                is_valid := bool(doors_open(elevator) = FALSE)
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
     /* ---------- chegada ao andar-alvo: abre portas e limpa chamadas ---------- */
 
-    OpenDoors(ee) =
+    OpenDoors(elevator) =
         PRE
-            ee : ELEVATOR & door_open(ee) = FALSE &
+            elevator : ELEVATORS & doors_open(elevator) = FALSE &
             (
-                position(ee) : cabin_calls[{ee}]     or
-                position(ee) : assign_up~[{ee}]      or
-                position(ee) : assign_down~[{ee}]
+                current_floor(elevator) : cabin_requests[{elevator}]      or
+                current_floor(elevator) : assigned_up_calls~[{elevator}]  or
+                current_floor(elevator) : assigned_down_calls~[{elevator}]
             )
         THEN
-            door_open(ee) := TRUE                                  ||
-            cabin_calls   := cabin_calls - {ee|->position(ee)}     ||
-            assign_up     := assign_up   - {position(ee)|->ee}     ||
-            assign_down   := assign_down - {position(ee)|->ee}     ||
-            direction(ee) := none
+            /* assigned_*_calls: remove o andar atual SÓ se ele estiver
+               atribuído a este elevador. Escrito com <<| (subtração de
+               domínio) em vez de "f - {andar |-> elevador}", porque o
+               provador demonstra automaticamente que <<| preserva
+               FLOORS +-> ELEVATORS */
+            doors_open(elevator)       := TRUE                                                  ||
+            cabin_requests             := cabin_requests      - {elevator |-> current_floor(elevator)} ||
+            assigned_up_calls          := ({current_floor(elevator)} /\ assigned_up_calls~[{elevator}])   <<| assigned_up_calls   ||
+            assigned_down_calls        := ({current_floor(elevator)} /\ assigned_down_calls~[{elevator}]) <<| assigned_down_calls ||
+            travel_direction(elevator) := idle
         END;
 
-    bb <-- OpenDoors_OK(ee) =
+    is_valid <-- OpenDoors_OK(elevator) =
         PRE
-            ee : INTEGER
+            elevator : INTEGER
         THEN
-            IF ee : ELEVATOR THEN
-                bb := bool(
-                        door_open(ee) = FALSE &
-                        (
-                            position(ee) : cabin_calls[{ee}]  or
-                            position(ee) : assign_up~[{ee}]   or
-                            position(ee) : assign_down~[{ee}]
-                        )
-                      )
+            IF elevator : ELEVATORS THEN
+                is_valid := bool(
+                    doors_open(elevator) = FALSE &
+                    (
+                        current_floor(elevator) : cabin_requests[{elevator}]      or
+                        current_floor(elevator) : assigned_up_calls~[{elevator}]  or
+                        current_floor(elevator) : assigned_down_calls~[{elevator}]
+                    )
+                )
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END;
 
-    CloseDoors(ee) =
+    CloseDoors(elevator) =
         PRE
-            ee : ELEVATOR & door_open(ee) = TRUE
+            elevator : ELEVATORS & doors_open(elevator) = TRUE
         THEN
-            door_open(ee) := FALSE
+            doors_open(elevator) := FALSE
         END;
 
-    bb <-- CloseDoors_OK(ee) =
+    is_valid <-- CloseDoors_OK(elevator) =
         PRE
-            ee : INTEGER
+            elevator : INTEGER
         THEN
-            IF ee : ELEVATOR THEN
-                bb := bool(door_open(ee) = TRUE)
+            IF elevator : ELEVATORS THEN
+                is_valid := bool(doors_open(elevator) = TRUE)
             ELSE
-                bb := FALSE
+                is_valid := FALSE
             END
         END
 
